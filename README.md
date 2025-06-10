@@ -92,6 +92,29 @@ Command Palette → "Switch Translation Provider"
    - `meta-llama/llama-4-scout-17b-16e-instruct`
    - Optimized for translation tasks
 
+
+## Build Locally
+to build the extension locally:
+```bash
+npm run package
+```
+
+make sure you have install vsce package globally:
+```bash
+npm install -g vsce
+```
+
+then run the following command to publish the extension:
+```bash
+vsce package
+```
+
+then it will generate a `.vsix` file that you can install in VSCode.
+and if you want to install it locally you can run the following command:
+```bash
+code --install-extension getx-locale-0.0.1.vsix
+```
+
 ## Error Handling
 
 The extension includes smart error handling:
