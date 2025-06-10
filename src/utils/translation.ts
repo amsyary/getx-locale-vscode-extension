@@ -13,7 +13,11 @@ import {
   showApiKeySetupDialog,
 } from "./api-key";
 
-// Add missing type for file objects
+// Cache and validation
+const translationCache: { [key: string]: string } = {};
+const englishTranslations: { [key: string]: string } = {};
+
+// Type definitions
 interface FileSystemPath {
   fsPath: string;
 }
@@ -208,6 +212,31 @@ export async function addKeysWithTranslation(
   let addedCount = 0;
   let errorCount = 0;
 
+  // First process en_US.dart to use as base translations
+  const enUsFile = translationFiles.find(
+    (file) =>
+      path.basename(file, ".dart") === "en_US" ||
+      path.basename(file, ".dart") === "en"
+  );
+
+  if (enUsFile) {
+    console.log("[Translation] Processing English translations first");
+    const added = await addKeysToTranslationFile(enUsFile, keys, false);
+    addedCount += added;
+
+    // Store English translations for fallback
+    const content = fs.readFileSync(enUsFile, "utf8");
+    const matches = content.matchAll(
+      /["']([^"']+)["']\s*:\s*["']([^"']+)["']/g
+    );
+    for (const match of matches) {
+      englishTranslations[match[1]] = match[2];
+    }
+
+    // Remove en_US.dart from the list since we've processed it
+    translationFiles = translationFiles.filter((f) => f !== enUsFile);
+  }
+
   try {
     await vscode.window.withProgress(
       {
@@ -340,23 +369,46 @@ export async function addKeysToTranslationFile(
         // Process batch with retries
         for (const key of batch) {
           try {
-            translations[key] = await translateText(key, locale, manager);
+            const translation = await translateText(key, locale, manager);
+
+            // Validate translation and use English fallback if needed
+            if (
+              translation &&
+              isValidTranslationForLocale(translation, locale)
+            ) {
+              translations[key] = translation;
+              console.log(
+                `[Translation] Successfully translated "${key}" to "${translation}"`
+              );
+            } else {
+              translations[key] = englishTranslations[key] || key;
+              console.log(
+                `[Translation] Using fallback for "${key}": "${translations[key]}"`
+              );
+            }
           } catch (error: any) {
-            console.error(`[Translation] Failed to translate "${key}":`, error);
-            if (error.statusCode === 400 || error.statusCode === 429) {
-              // Wait longer for rate limits
-              await new Promise((resolve) => setTimeout(resolve, 2000));
+            if (error.statusCode === 429) {
+              console.log("[Translation] Rate limit hit, waiting...");
+              await new Promise((resolve) => setTimeout(resolve, 5000));
               try {
-                translations[key] = await translateText(key, locale, manager);
-              } catch (retryError) {
-                console.error(
-                  `[Translation] Retry failed for "${key}":`,
-                  retryError
+                const retryTranslation = await translateText(
+                  key,
+                  locale,
+                  manager
                 );
-                translations[key] = key; // Fallback to original key
+                if (
+                  retryTranslation &&
+                  isValidTranslationForLocale(retryTranslation, locale)
+                ) {
+                  translations[key] = retryTranslation;
+                } else {
+                  translations[key] = englishTranslations[key] || key;
+                }
+              } catch (retryError) {
+                translations[key] = englishTranslations[key] || key;
               }
             } else {
-              translations[key] = key; // Fallback to original key
+              translations[key] = englishTranslations[key] || key;
             }
           }
         }
@@ -372,8 +424,9 @@ export async function addKeysToTranslationFile(
         }
       }
     } else {
-      // For English, just use keys as-is
+      // For English, update translations cache and use as-is
       for (const key of newKeys) {
+        englishTranslations[key] = key;
         newEntries.push(`  "${key}": "${key}"`);
       }
     }
@@ -415,6 +468,38 @@ export function extractExistingKeys(content: string): string[] {
   return keys;
 }
 
+// Helper function to validate translations based on locale
+function isValidTranslationForLocale(
+  translation: string,
+  locale: string
+): boolean {
+  if (!translation || translation.trim().length === 0) {
+    return false;
+  }
+
+  // Language-specific validation
+  switch (locale.split("_")[0]) {
+    case "fr":
+      // French should contain French-specific characters
+      return /^[a-zàâäéèêëîïôöùûüÿçœæ\s''"-]+$/i.test(translation);
+    case "ar":
+      // Arabic should contain Arabic script
+      return /[\u0600-\u06FF]/.test(translation);
+    case "zh":
+      // Chinese should contain Chinese characters
+      return /[\u4E00-\u9FFF]/.test(translation);
+    case "ur":
+      // Urdu should contain Urdu script
+      return /[\u0600-\u06FF]/.test(translation);
+    default:
+      // For other languages, ensure it's not mixed with unexpected scripts
+      return (
+        !/[\u0600-\u06FF\u4E00-\u9FFF]/.test(translation) ||
+        locale.startsWith(translation.slice(0, 2).toLowerCase())
+      );
+  }
+}
+
 function getLanguageFromLocale(locale: string): string {
   console.log(`[Language Mapping] Input locale: ${locale}`);
 
@@ -444,13 +529,12 @@ function getLanguageFromLocale(locale: string): string {
   return language;
 }
 
+// Helper function to validate translations based on locale
+
 export function getLocaleFromFilename(filePath: string): string {
   const fileName = path.basename(filePath, ".dart");
   return fileName;
 }
-
-// Translation cache to avoid duplicate API calls
-const translationCache: { [key: string]: string } = {};
 
 export async function translateText(
   text: string,
@@ -476,8 +560,16 @@ export async function translateText(
     }
 
     // Cache the successful translation
-    translationCache[cacheKey] = translation;
-    return translation;
+    // Validate translation before caching
+    if (isValidTranslationForLocale(translation, locale)) {
+      translationCache[cacheKey] = translation;
+      return translation;
+    } else {
+      console.log(
+        `[Translation] Invalid translation detected for locale ${locale}, using English fallback`
+      );
+      return englishTranslations[text] || text;
+    }
   } catch (error: any) {
     if (error.statusCode === 400) {
       console.log(`[Translation] API error for "${text}", using original text`);

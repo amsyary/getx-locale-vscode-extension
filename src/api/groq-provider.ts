@@ -9,7 +9,7 @@ export class GroqTranslationProvider implements TranslationProvider {
     this.apiKey = apiKey;
     // Get preferred model from settings
     const config = vscode.workspace.getConfiguration("getx-locale");
-    this.model = config.get("preferredModel.groq", "llama2-70b-4096");
+    this.model = config.get("preferredModel.groq", "mistral-saba-24b");
   }
 
   async translate(text: string, targetLanguage: string): Promise<string> {
