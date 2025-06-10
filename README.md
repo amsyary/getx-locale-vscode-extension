@@ -17,3 +17,18 @@ Key Features:
 1. Right-click in a Dart file → "Extract GetX Translation Keys from Current File"
 2. Use keyboard shortcut: Ctrl+Shift+L (Windows/Linux) or Cmd+Shift+L (Mac)
 3. Scan entire project: Right-click in Explorer → "Scan Entire Project for GetX Translation Keys"
+
+## Folder Structure Patterns
+The extension will look for translation files in the following patterns:
+```
+// Common patterns for translation files
+  const patterns = [
+    "**/lib/**/translations/*.dart",
+    "**/lib/**/translation/*.dart",
+    "**/lib/**/localization/*.dart",
+    "**/lib/**/locale/*.dart",
+    "**/lib/**/lang/*.dart",
+  ];
+```
+
+you can customize these patterns in the `src/extension.ts` file if your project uses different folder structures.
