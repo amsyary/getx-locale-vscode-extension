@@ -4,12 +4,20 @@
   "description": "Automatically extract and manage GetX localization keys",
   "version": "0.0.1",
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.85.0"
+  },
+  "capabilities": {
+    "languageModels": true
   },
   "categories": [
-    "Other"
+    "Other",
+    "Machine Translation"
   ],
   "activationEvents": [
+    "onCommand:getx-locale.extractKeys",
+    "onCommand:getx-locale.scanProject",
+    "onCommand:getx-locale.manageApiKey",
+    "onLanguage:dart"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -17,12 +25,22 @@
       {
         "command": "getx-locale.extractKeys",
         "title": "Extract GetX Translation Keys from Current File",
-        "category": "GetX Localization"
+        "category": "GetX Locale"
       },
       {
         "command": "getx-locale.scanProject",
         "title": "Scan Entire Project for GetX Translation Keys",
-        "category": "GetX Localization"
+        "category": "GetX Locale"
+      },
+      {
+        "command": "getx-locale.manageApiKey",
+        "title": "Manage Translation API Keys",
+        "category": "GetX Locale"
+      },
+      {
+        "command": "getx-locale.switchProvider",
+        "title": "Switch Translation Provider",
+        "category": "GetX Locale"
       }
     ],
     "menus": {
@@ -47,7 +65,44 @@
         "mac": "cmd+shift+l",
         "when": "editorTextFocus && resourceExtname == .dart"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "GetX Locale",
+      "properties": {
+        "getx-locale.translationProvider": {
+          "type": "string",
+          "enum": ["openai", "groq"],
+          "enumDescriptions": [
+            "Use OpenAI API (requires API key)",
+            "Use Groq API with Llama model (requires API key)"
+          ],
+          "default": "openai",
+          "description": "Select which provider to use for translations"
+        },
+        "getx-locale.preferredModel": {
+          "type": "object",
+          "properties": {
+            "openai": {
+              "type": "string",
+              "enum": ["gpt-3.5-turbo", "gpt-4"],
+              "default": "gpt-3.5-turbo",
+              "description": "Select which OpenAI model to use"
+            },
+            "groq": {
+              "type": "string",
+              "enum": ["meta-llama/llama-4-scout-17b-16e-instruct"],
+              "default": "meta-llama/llama-4-scout-17b-16e-instruct",
+              "description": "Select which Groq model to use"
+            }
+          },
+          "default": {
+            "openai": "gpt-3.5-turbo",
+            "groq": "meta-llama/llama-4-scout-17b-16e-instruct"
+          },
+          "description": "Configure preferred models for each provider"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
