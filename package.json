@@ -6,9 +6,6 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "capabilities": {
-    "languageModels": true
-  },
   "categories": [
     "Other",
     "Machine Translation"

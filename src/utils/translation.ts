@@ -13,6 +13,11 @@ import {
   showApiKeySetupDialog,
 } from "./api-key";
 
+// Add missing type for file objects
+interface FileSystemPath {
+  fsPath: string;
+}
+
 export async function initializeTranslationProviders(
   context: vscode.ExtensionContext
 ): Promise<void> {
@@ -143,7 +148,6 @@ export async function findTranslationFiles(
 ): Promise<string[]> {
   const files: string[] = [];
 
-  // Common patterns for translation files
   const patterns = [
     "**/lib/**/translations/*.dart",
     "**/lib/**/translation/*.dart",
@@ -154,12 +158,11 @@ export async function findTranslationFiles(
 
   for (const pattern of patterns) {
     const foundFiles = await vscode.workspace.findFiles(pattern);
-    files.push(...foundFiles.map((f) => f.fsPath));
+    files.push(...foundFiles.map((f: FileSystemPath) => f.fsPath));
   }
 
-  // Filter files that look like translation files (contain locale codes)
   const localePattern = /([a-z]{2}_[A-Z]{2}|[a-z]{2})\.dart$/;
-  return files.filter((file) => {
+  return files.filter((file: string) => {
     const fileName = path.basename(file);
     return localePattern.test(fileName);
   });
@@ -192,15 +195,13 @@ export async function addKeysWithTranslation(
   translationFiles: string[],
   keys: string[]
 ): Promise<void> {
-  // Ensure providers are initialized
   await initializeTranslationProviders(context);
   const manager = TranslationProviderManager.getInstance();
 
-  // If no provider is available or needs setup
   if (manager.getAvailableProviders().length === 0) {
     const setupSuccess = await setupTranslationProvider(context);
     if (!setupSuccess) {
-      return; // User cancelled or setup failed
+      return;
     }
   }
 
@@ -225,10 +226,11 @@ export async function addKeysWithTranslation(
         errorCount++;
         console.error(`Error processing ${file}:`, error);
 
-        // Try switching providers
         const currentProvider = await manager.getCurrentProviderName();
         const providers = manager.getAvailableProviders();
-        const otherProvider = providers.find((p) => p !== currentProvider);
+        const otherProvider = providers.find(
+          (p: string) => p !== currentProvider
+        );
         if (otherProvider) {
           try {
             await manager.setCurrentProvider(otherProvider);
@@ -257,7 +259,7 @@ export async function addKeysWithTranslation(
         "Switch Provider",
         "Proceed Without Translation"
       )
-      .then((choice) => {
+      .then((choice: string | undefined) => {
         if (choice === "Switch Provider") {
           switchTranslationProvider(context).then(() => {
             addKeysWithTranslation(context, translationFiles, keys);
@@ -294,13 +296,9 @@ export async function addKeysToTranslationFile(
     const content = fs.readFileSync(filePath, "utf8");
     let addedCount = 0;
 
-    // Get locale from filename
     const locale = getLocaleFromFilename(filePath);
-
-    // Parse the existing keys from the file
     const existingKeys = extractExistingKeys(content);
 
-    // Find the map declaration
     const mapRegex = /Map<String,\s*String>\s+\w+\s*=\s*{([^}]*)}/s;
     const mapMatch = content.match(mapRegex);
 
@@ -323,22 +321,19 @@ export async function addKeysToTranslationFile(
       return 0;
     }
 
-    // Generate new key-value pairs
     const newEntries: string[] = [];
     const manager = TranslationProviderManager.getInstance();
 
     for (const key of newKeys) {
-      let translation = key; // Default fallback
+      let translation = key;
 
       if (useTranslation && locale !== "en_US" && locale !== "en") {
         try {
-          // Add small delay to avoid rate limiting
           await new Promise((resolve) => setTimeout(resolve, 200));
           translation = await manager.translate(key, locale);
           console.log(`Translated "${key}" to "${translation}" for ${locale}`);
         } catch (error) {
           console.error(`Translation failed for "${key}":`, error);
-          // Keep original key as fallback
         }
       }
 
@@ -346,20 +341,16 @@ export async function addKeysToTranslationFile(
     }
 
     const newEntriesStr = newEntries.join(",\n");
-
-    // Find the position to insert new keys (before the closing brace)
     const mapContent = mapMatch[1];
     const hasExistingEntries = mapContent.trim().length > 0;
 
     let updatedContent;
     if (hasExistingEntries) {
-      // Add comma and new entries
-      updatedContent = content.replace(mapRegex, (match, p1) =>
+      updatedContent = content.replace(mapRegex, (match: string, p1: string) =>
         match.replace(p1, p1 + ",\n" + newEntriesStr + "\n")
       );
     } else {
-      // First entries
-      updatedContent = content.replace(mapRegex, (match, p1) =>
+      updatedContent = content.replace(mapRegex, (match: string, p1: string) =>
         match.replace(p1, "\n" + newEntriesStr + "\n")
       );
     }
