@@ -205,43 +205,52 @@ export async function addKeysWithTranslation(
     }
   }
 
-  const progress = vscode.window.createStatusBarItem(
-    vscode.StatusBarAlignment.Left
-  );
-  progress.show();
   let addedCount = 0;
   let errorCount = 0;
 
   try {
-    for (const file of translationFiles) {
-      const provider = await manager.getCurrentProviderName();
-      progress.text = `$(sync~spin) Translating keys using ${provider} for ${path.basename(
-        file
-      )}...`;
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: "GetX Locale: Translating",
+        cancellable: false,
+      },
+      async (progress) => {
+        const increment = 100 / (translationFiles.length * keys.length);
 
-      try {
-        const added = await addKeysToTranslationFile(file, keys, true);
-        addedCount += added;
-      } catch (error: any) {
-        errorCount++;
-        console.error(`Error processing ${file}:`, error);
+        for (const file of translationFiles) {
+          const provider = await manager.getCurrentProviderName();
+          const fileName = path.basename(file);
+          progress.report({
+            message: `Using ${provider} for ${fileName}...`,
+            increment,
+          });
 
-        const currentProvider = await manager.getCurrentProviderName();
-        const providers = manager.getAvailableProviders();
-        const otherProvider = providers.find(
-          (p: string) => p !== currentProvider
-        );
-        if (otherProvider) {
           try {
-            await manager.setCurrentProvider(otherProvider);
-            console.log(`Switched to provider: ${otherProvider}`);
-          } catch (e) {
-            console.error(`Failed to switch to ${otherProvider}:`, e);
-            continue;
+            const added = await addKeysToTranslationFile(file, keys, true);
+            addedCount += added;
+          } catch (error: any) {
+            errorCount++;
+            console.error(`Error processing ${file}:`, error);
+
+            const currentProvider = await manager.getCurrentProviderName();
+            const providers = manager.getAvailableProviders();
+            const otherProvider = providers.find(
+              (p: string) => p !== currentProvider
+            );
+            if (otherProvider) {
+              try {
+                await manager.setCurrentProvider(otherProvider);
+                console.log(`Switched to provider: ${otherProvider}`);
+              } catch (e) {
+                console.error(`Failed to switch to ${otherProvider}:`, e);
+                continue;
+              }
+            }
           }
         }
       }
-    }
+    );
 
     if (addedCount > 0 || errorCount === 0) {
       const provider = await manager.getCurrentProviderName();
@@ -268,8 +277,6 @@ export async function addKeysWithTranslation(
           addKeysWithoutTranslation(translationFiles, keys);
         }
       });
-  } finally {
-    progress.dispose();
   }
 }
 
@@ -324,20 +331,51 @@ export async function addKeysToTranslationFile(
     const newEntries: string[] = [];
     const manager = TranslationProviderManager.getInstance();
 
-    for (const key of newKeys) {
-      let translation = key;
+    if (useTranslation && locale !== "en_US" && locale !== "en") {
+      const batchSize = 2; // Process two keys at a time
+      for (let i = 0; i < newKeys.length; i += batchSize) {
+        const batch = newKeys.slice(i, i + batchSize);
+        const translations: { [key: string]: string } = {};
 
-      if (useTranslation && locale !== "en_US" && locale !== "en") {
-        try {
-          await new Promise((resolve) => setTimeout(resolve, 200));
-          translation = await manager.translate(key, locale);
-          console.log(`Translated "${key}" to "${translation}" for ${locale}`);
-        } catch (error) {
-          console.error(`Translation failed for "${key}":`, error);
+        // Process batch with retries
+        for (const key of batch) {
+          try {
+            translations[key] = await translateText(key, locale, manager);
+          } catch (error: any) {
+            console.error(`[Translation] Failed to translate "${key}":`, error);
+            if (error.statusCode === 400 || error.statusCode === 429) {
+              // Wait longer for rate limits
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              try {
+                translations[key] = await translateText(key, locale, manager);
+              } catch (retryError) {
+                console.error(
+                  `[Translation] Retry failed for "${key}":`,
+                  retryError
+                );
+                translations[key] = key; // Fallback to original key
+              }
+            } else {
+              translations[key] = key; // Fallback to original key
+            }
+          }
+        }
+
+        // Add translated entries
+        for (const key of batch) {
+          newEntries.push(`  "${key}": "${translations[key] || key}"`);
+        }
+
+        // Wait between batches to avoid rate limits
+        if (i + batchSize < newKeys.length) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
         }
       }
-
-      newEntries.push(`  "${key}": "${translation}"`);
+    } else {
+      // For English, just use keys as-is
+      for (const key of newKeys) {
+        newEntries.push(`  "${key}": "${key}"`);
+      }
     }
 
     const newEntriesStr = newEntries.join(",\n");
@@ -377,7 +415,109 @@ export function extractExistingKeys(content: string): string[] {
   return keys;
 }
 
+function getLanguageFromLocale(locale: string): string {
+  console.log(`[Language Mapping] Input locale: ${locale}`);
+
+  const languageMap: { [key: string]: string } = {
+    ur_PK: "Urdu",
+    id_ID: "Indonesian (Bahasa Indonesia)", // More specific language name
+    en_US: "English",
+    en: "English",
+    ar_SA: "Arabic",
+    zh_CN: "Chinese (Simplified)",
+    hi_IN: "Hindi",
+  };
+
+  // Split locale code to get language code
+  const langCode = locale.split("_")[0];
+  const fallbackMap: { [key: string]: string } = {
+    ur: "Urdu",
+    id: "Indonesian (Bahasa Indonesia)", // More specific language name
+    en: "English",
+    ar: "Arabic",
+    zh: "Chinese",
+    hi: "Hindi",
+  };
+
+  const language = languageMap[locale] || fallbackMap[langCode] || locale;
+  console.log(`[Language Mapping] Mapped to: ${language}`);
+  return language;
+}
+
 export function getLocaleFromFilename(filePath: string): string {
   const fileName = path.basename(filePath, ".dart");
   return fileName;
+}
+
+// Translation cache to avoid duplicate API calls
+const translationCache: { [key: string]: string } = {};
+
+export async function translateText(
+  text: string,
+  locale: string,
+  manager: TranslationProviderManager
+): Promise<string> {
+  // Check cache first
+  const cacheKey = `${text}:${locale}`;
+  if (translationCache[cacheKey]) {
+    console.log(`[Translation] Cache hit for "${text}" in ${locale}`);
+    return translationCache[cacheKey];
+  }
+
+  const targetLanguage = getLanguageFromLocale(locale);
+
+  try {
+    // Increased delay between requests
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const translation = await manager.translate(text, targetLanguage);
+
+    if (!translation || translation.trim().length === 0) {
+      throw new Error(`Empty translation received for "${text}"`);
+    }
+
+    // Cache the successful translation
+    translationCache[cacheKey] = translation;
+    return translation;
+  } catch (error: any) {
+    if (error.statusCode === 400) {
+      console.log(`[Translation] API error for "${text}", using original text`);
+      return text;
+    }
+    if (error.statusCode === 429) {
+      console.log(`[Translation] Rate limit hit, waiting 5 seconds...`);
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      return translateText(text, locale, manager); // Retry once after delay
+    }
+    throw error;
+  }
+}
+
+// Add this function to handle batch translations
+export async function translateBatch(
+  texts: string[],
+  locale: string,
+  manager: TranslationProviderManager
+): Promise<{ [key: string]: string }> {
+  const results: { [key: string]: string } = {};
+  const batchSize = 2;
+
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(async (text) => {
+        try {
+          results[text] = await translateText(text, locale, manager);
+        } catch (error) {
+          console.error(`Failed to translate "${text}":`, error);
+          results[text] = text;
+        }
+      })
+    );
+    // Wait between batches to avoid rate limits
+    if (i + batchSize < texts.length) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+
+  return results;
 }

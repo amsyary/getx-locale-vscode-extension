@@ -23,7 +23,15 @@ export class OpenAITranslationProvider implements TranslationProvider {
       messages: [
         {
           role: "system",
-          content: `You are a professional translator. Translate the given text to ${targetLanguage}. Return only the translated text, nothing else. Keep the same tone and context.`,
+          content: `You are a translation engine specialized in ${targetLanguage}. Rules:
+1. Translate the given text precisely to ${targetLanguage}
+2. ONLY return the direct translation in the target language
+3. DO NOT use translations from other languages
+4. DO NOT include explanations or alternatives
+5. DO NOT wrap the translation in quotes
+6. DO NOT add any additional text
+7. Maintain cultural appropriateness for ${targetLanguage}
+Example format: if input is "Email" and target is Urdu, output only "ای میل"`,
         },
         {
           role: "user",
@@ -74,8 +82,19 @@ export class OpenAITranslationProvider implements TranslationProvider {
               return;
             }
 
-            const translatedText =
-              parsed.choices?.[0]?.message?.content?.trim();
+            let translatedText = parsed.choices?.[0]?.message?.content?.trim();
+
+            // Clean up the response
+            if (translatedText) {
+              // Remove quotes if present
+              translatedText = translatedText.replace(/^["']|["']$/g, "");
+
+              // Take only the first line if multiple lines exist
+              translatedText = translatedText.split("\n")[0];
+
+              // Remove any explanatory text after punctuation
+              translatedText = translatedText.split(/[.,;:]/)[0].trim();
+            }
             if (!translatedText) {
               reject(new Error("Invalid response format from OpenAI API"));
               return;

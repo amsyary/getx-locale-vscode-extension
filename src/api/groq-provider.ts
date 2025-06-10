@@ -9,26 +9,37 @@ export class GroqTranslationProvider implements TranslationProvider {
     this.apiKey = apiKey;
     // Get preferred model from settings
     const config = vscode.workspace.getConfiguration("getx-locale");
-    this.model = config.get(
-      "preferredModel.groq",
-      "meta-llama/llama-4-scout-17b-16e-instruct"
-    );
+    this.model = config.get("preferredModel.groq", "llama2-70b-4096");
   }
 
   async translate(text: string, targetLanguage: string): Promise<string> {
+    console.log(
+      `[Groq] Starting translation for "${text}" to ${targetLanguage}`
+    );
+    console.log(`[Groq] Using model: ${this.model}`);
+
+    // Prepare request with stricter system message
     const data = JSON.stringify({
       model: this.model,
       messages: [
         {
           role: "system",
-          content: `You are a professional translator. Translate the given text to ${targetLanguage}. Return only the translated text, nothing else. Keep the same tone and context.`,
+          content: `You are a direct translation engine. Instructions:
+1. ONLY output the exact translation of the input text to ${targetLanguage}
+2. DO NOT add any explanations, notes, or alternatives
+3. DO NOT include quotation marks or formatting
+4. DO NOT respond with anything except the translation
+5. Keep names and technical terms as-is when appropriate
+
+Example input: "Email"
+Example output for Urdu: ای میل`,
         },
         {
           role: "user",
           content: text,
         },
       ],
-      temperature: 0.3,
+      temperature: 0.1, // Lower temperature for more consistent outputs
     });
 
     const options = {
@@ -39,11 +50,10 @@ export class GroqTranslationProvider implements TranslationProvider {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
-        "Content-Length": data.length,
+        "Content-Length": Buffer.byteLength(data),
       },
       timeout: 10000,
     };
-
     return new Promise((resolve, reject) => {
       const req = require("https").request(options, (res: any) => {
         let responseData = "";
@@ -55,29 +65,46 @@ export class GroqTranslationProvider implements TranslationProvider {
 
         res.on("end", () => {
           try {
-            if (statusCode >= 400) {
-              const error = new Error(`HTTP Error ${statusCode}`);
-              (error as any).statusCode = statusCode;
-              reject(error);
-              return;
-            }
-
+            console.log(`[Groq] Raw response (${statusCode}):`, responseData);
             const parsed = JSON.parse(responseData);
 
-            if (parsed.error) {
-              const error = new Error(parsed.error.message);
-              (error as any).code = parsed.error.code;
+            if (statusCode >= 400 || parsed.error) {
+              const errorDetails = parsed.error || {};
+              const errorMessage =
+                errorDetails.message || `HTTP Error ${statusCode}`;
+              console.error(`[Groq] API Error:`, {
+                status: statusCode,
+                message: errorMessage,
+                details: errorDetails,
+              });
+
+              const error = new Error(errorMessage);
+              (error as any).statusCode = statusCode;
+              (error as any).response = parsed;
               reject(error);
               return;
             }
 
-            const translatedText =
-              parsed.choices?.[0]?.message?.content?.trim();
+            let translatedText = parsed.choices?.[0]?.message?.content?.trim();
+            console.log(`[Groq] Raw translation:`, translatedText);
+
             if (!translatedText) {
-              reject(new Error("Invalid response format from Groq API"));
+              console.error("[Groq] Empty translation response");
+              reject(new Error("Empty translation response from Groq API"));
               return;
             }
 
+            // Clean up response
+            translatedText = translatedText
+              .replace(/^["']|["']$/g, "") // Remove surrounding quotes
+              .split("\n")[0] // Take first line only
+              .split(/[.,;:]/) // Remove explanatory text
+              .map((s) => s.trim()) // Trim each part
+              .filter((s) => s.length > 0)[0]; // Take first non-empty part
+
+            console.log(
+              `[Groq] Final translation: "${text}" → "${translatedText}"`
+            );
             resolve(translatedText);
           } catch (error) {
             reject(new Error(`Failed to parse Groq response: ${error}`));
@@ -124,19 +151,29 @@ export async function setGroqApiKey(
   context: vscode.ExtensionContext,
   apiKey: string
 ): Promise<void> {
-  // Store the key first
-  await context.secrets.store(GROQ_API_KEY_SECRET, apiKey);
+  console.log("[Groq Setup] Starting API key verification...");
+  const testProvider = new GroqTranslationProvider(apiKey);
 
-  // Verify the key works by attempting a simple translation
-  const provider = new GroqTranslationProvider(apiKey);
   try {
-    await provider.translate("test", "English");
-  } catch (error: any) {
-    // If verification fails, delete the stored key
-    await context.secrets.delete(GROQ_API_KEY_SECRET);
+    console.log("[Groq Setup] Testing with model:", testProvider.getModel());
+    const response = await testProvider.translate("test", "English");
+    console.log("[Groq Setup] Test response:", response);
 
+    // Store the key only if the test was successful
+    await context.secrets.store(GROQ_API_KEY_SECRET, apiKey);
+    console.log("[Groq Setup] API key verified and stored successfully");
+  } catch (error: any) {
+    console.error("[Groq Setup] Verification failed:", error);
+
+    // Don't store the key if verification fails
     if (error.statusCode === 401) {
-      throw new Error("Invalid API key. The key was not accepted by Groq.");
+      throw new Error("Invalid API key. Please check your Groq API key.");
+    } else if (error.statusCode === 400) {
+      throw new Error(
+        `Invalid request: ${error.message}. Please verify your API key format.`
+      );
+    } else if (error.response?.error) {
+      throw new Error(`API Error: ${error.response.error.message}`);
     } else {
       throw new Error(`Failed to verify API key: ${error.message || error}`);
     }
@@ -144,25 +181,30 @@ export async function setGroqApiKey(
 }
 
 export async function testGroqApiKey(apiKey: string): Promise<void> {
-  const provider = new GroqTranslationProvider(apiKey);
+  const testProvider = new GroqTranslationProvider(apiKey);
   try {
+    console.log("[Groq Test] Starting with model:", testProvider.getModel());
     vscode.window.showInformationMessage("Testing Groq API Key...");
-    const testTranslation = await provider.translate("hello", "Indonesian");
+
+    const testTranslation = await testProvider.translate("hello", "Indonesian");
+    console.log("[Groq Test] Test response:", testTranslation);
+
     if (testTranslation && testTranslation !== "hello") {
       vscode.window.showInformationMessage(
         `✅ Groq API Key works! Test translation: "hello" → "${testTranslation}"`
       );
     } else {
-      vscode.window.showErrorMessage(
-        "❌ Groq API Key test failed: Translation returned unchanged text"
-      );
+      throw new Error("Translation returned unchanged text");
     }
   } catch (error: any) {
+    console.error("[Groq Test] Error:", error);
     let errorMessage = "❌ Groq API Key test failed";
 
     if (error.statusCode === 401) {
       errorMessage =
         "❌ Invalid API Key. Please check your API key and try again.";
+    } else if (error.statusCode === 400) {
+      errorMessage = `❌ API Error: ${error.message}. Please verify your API key format.`;
     } else if (error.statusCode === 429) {
       errorMessage =
         "❌ Rate limit exceeded. Please try again in a few moments.";
@@ -173,6 +215,7 @@ export async function testGroqApiKey(apiKey: string): Promise<void> {
     }
 
     vscode.window.showErrorMessage(errorMessage);
+    throw new Error(errorMessage); // Re-throw to propagate the error
   }
 }
 
