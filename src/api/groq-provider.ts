@@ -99,8 +99,8 @@ Example output for Urdu: ای میل`,
               .replace(/^["']|["']$/g, "") // Remove surrounding quotes
               .split("\n")[0] // Take first line only
               .split(/[.,;:]/) // Remove explanatory text
-              .map((s) => s.trim()) // Trim each part
-              .filter((s) => s.length > 0)[0]; // Take first non-empty part
+              .map((s: string) => s.trim()) // Trim each part
+              .filter((s: string) => s.length > 0)[0]; // Take first non-empty part (if any)
 
             console.log(
               `[Groq] Final translation: "${text}" → "${translatedText}"`
