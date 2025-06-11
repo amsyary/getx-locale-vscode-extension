@@ -14,6 +14,7 @@
     "onCommand:getx-locale.extractKeys",
     "onCommand:getx-locale.scanProject",
     "onCommand:getx-locale.manageApiKey",
+    "onCommand:getx-locale.createTranslationFiles",
     "onLanguage:dart"
   ],
   "main": "./dist/extension.js",
@@ -38,6 +39,11 @@
         "command": "getx-locale.switchProvider",
         "title": "Switch Translation Provider",
         "category": "GetX Locale"
+      },
+      {
+        "command": "getx-locale.createTranslationFiles",
+        "title": "Create Translation Files",
+        "category": "GetX Locale"
       }
     ],
     "menus": {
@@ -51,6 +57,11 @@
       "explorer/context": [
         {
           "command": "getx-locale.scanProject",
+          "group": "getx-locale"
+        },
+        {
+          "command": "getx-locale.createTranslationFiles",
+          "when": "explorerResourceIsFolder",
           "group": "getx-locale"
         }
       ]

@@ -6,6 +6,7 @@ import {
   switchTranslationProvider,
 } from "../utils/translation";
 import { manageOpenAIApiKey } from "../utils/api-key";
+import { TranslationFilesPanel } from "../webview/translation-files-panel";
 
 export function registerCommands(context: vscode.ExtensionContext) {
   // Command to extract and add translation keys
@@ -118,8 +119,26 @@ export function registerCommands(context: vscode.ExtensionContext) {
     () => switchTranslationProvider(context)
   );
 
+  // Command to create translation files
+  const createTranslationFilesCommand = vscode.commands.registerCommand(
+    "getx-locale.createTranslationFiles",
+    async (folder: vscode.Uri) => {
+      if (!folder) {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+          vscode.window.showErrorMessage("No folder selected");
+          return;
+        }
+        folder = workspaceFolder.uri;
+      }
+
+      await TranslationFilesPanel.createOrShow(folder, context.extensionUri);
+    }
+  );
+
   context.subscriptions.push(extractCommand);
   context.subscriptions.push(scanProjectCommand);
   context.subscriptions.push(manageApiKeyCommand);
   context.subscriptions.push(switchProviderCommand);
+  context.subscriptions.push(createTranslationFilesCommand);
 }
