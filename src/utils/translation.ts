@@ -491,6 +491,9 @@ function isValidTranslationForLocale(
     case "ur":
       // Urdu should contain Urdu script
       return /[\u0600-\u06FF]/.test(translation);
+    case "pt":
+      // Portuguese should contain Portuguese-specific characters
+      return /^[a-záàâãéèêíìóòôõúùüçñ\s''"-]+$/i.test(translation);
     default:
       // For other languages, ensure it's not mixed with unexpected scripts
       return (
@@ -511,6 +514,7 @@ function getLanguageFromLocale(locale: string): string {
     ar_SA: "Arabic",
     zh_CN: "Chinese (Simplified)",
     hi_IN: "Hindi",
+    pt_BR: "Portuguese (Brazil)", // Added Brazilian Portuguese
   };
 
   // Split locale code to get language code
@@ -522,6 +526,7 @@ function getLanguageFromLocale(locale: string): string {
     ar: "Arabic",
     zh: "Chinese",
     hi: "Hindi",
+    pt: "Portuguese", // Added Portuguese fallback
   };
 
   const language = languageMap[locale] || fallbackMap[langCode] || locale;
